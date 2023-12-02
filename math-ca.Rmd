@@ -1,0 +1,216 @@
+---
+title: "Mathematics Behind CA"
+author: "Kinanty Tasya Octaviane"
+date: "`r format(Sys.Date(), '%B %e, %Y')`"
+output:
+  html_document:
+    number_sections: false
+    toc: false
+    toc_depth: 3
+    df_print: paged
+    theme: united
+    highlight: breezedark
+    css: assets/style.css
+  pdf_document:
+    latex_engine: xelatex
+---
+
+<style>
+
+body {
+text-align: justify}
+
+</style>
+
+```{r setup, include=FALSE}
+# clear-up the environment
+rm(list = ls())
+
+# chunk options
+knitr::opts_chunk$set(
+  message = FALSE,
+  warning = FALSE,
+  fig.align = "center",
+  comment = "#>"
+)
+
+options(scipen = 999)
+```
+
+# Cara Kerja Correspondence Analysis
+
+CA membentuk suatu plot yang terdiri dari titik baris dan titik kolom. Posisi titik ini dihitung dengan mengatur koordinatnya sedemikian sehingga didapatkan hubungan antara titik baris dan kolom dalam dua dimensi. Hal ini dilakukan dengan melakukan Singular Value Decomposition (SVD) untuk meminimalkan standardized residual.
+
+Berikut adalah langkah-langkah kerja metode Correspondence Analysis secara matematis:
+
+**Step 1: Prepare the data**
+
+Seperti dalam analisis apa pun, langkah pertama adalah mempersiapkan data. Dalam CA, data harus berupa **tabel kontingensi**.
+
+Pada tahap ini, kita akan menggunakan data `housetasks` yang merupakan tabel kontingensi dari `factoextra` package. Baris pada `housetasks` adalah kategori pekerjaan rumah dan kolomnya adalah role keluarga.
+
+```{r}
+# Load the housetasks dataset
+data(housetasks, package = "factoextra")
+housetasks
+```
+
+**Step 2: Calculate the row and column marginals**
+
+Dalam CA, margin baris dan kolom digunakan untuk menghitung expected, yang digunakan dalam perhitungan statistik chi-squared. Anda dapat menghitung margin baris dan kolom menggunakan fungsi `rowSums()` dan `colSums()`.
+
+* Row marginal/ margin baris: jumlah frekuensi per baris
+* Column marginal/margin kolom: jumlah frekuensi per kolom
+
+```{r}
+# Calculate row marginals
+row_marginals <- rowSums(housetasks)
+row_marginals
+```
+```{r}
+# Calculate column marginals
+col_marginals <- colSums(housetasks)
+col_marginals
+```
+
+**Step 3: Calculate the expected values**
+
+Expected values dihitung dengan asumsi independensi antar variabel. Untuk menghitung expected values, Anda dapat menggunakan perkalian dari margin baris dan kolom, dibagi dengan frekuensi total data. Atau dirumuskan juga sebagai berikut:
+
+$$E_i=\frac{row.marginals * col.marginas}{grand.total}$$
+
+```{r}
+# Calculate expected values
+n <- sum(housetasks)
+expected <- outer(row_marginals, col_marginals) / n
+expected
+```
+```{r}
+#math
+(176*600)/n
+```
+
+
+**Step 4: Calculate the Standardized Residual Matrix**
+
+Standardized residual adalah akar dari statistik chi-squared yang dapat diperoleh dengan `chisq.test()$residuals`. Standadized residual mengukur standar deviasi dari frekuensi yang diamati dengan frekuensi yang diharapkan di bawah asumsi independensi. Formulanya adalah sebagai berikut.
+$$S = \frac{O - E}{\sqrt{E}}$$
+
+```{r}
+# Calculate the chi-squared matrix
+chi_sq <- chisq.test(housetasks)$residuals
+chi_sq
+```
+```{r}
+#standardized residual manual
+Z = ((housetasks-expected)/sqrt(expected))
+Z
+```
+
+**Step 5: Perform Singular Value Decomposition (SVD)**
+
+SVD digunakan untuk mendekomposisi standardized residual untuk merangkum data awal. Dalam CA, matriks input untuk SVD adalah matriks **M** yaitu matriks proporsi dari standardized residuals. 
+
+Formula untuk matriks **M** adalah $$M = \frac{S}{\sqrt{grand.total}}$$
+Istilah SVD artinya mencari matriks ortogonal **U** dan **V**, bersama dengan matriks diagonal **D** dari matriks **M** sedemikian sehingga:
+$$M = UDV^T$$
+
+* **U** adalah matriks yang mengandung *vektor eigen baris*
+* **D** adalah matriks diagonal. Angka-angka pada diagonal matriks disebut *singular value* ($\delta$). *Nilai eigen* adalah nilai singular dikuadratkan, $\lambda=\delta^2$.
+* **V** adalah matriks yang berisi *vektor eigen kolom*
+
+Catatan:
+
+* matriks ortogonal: matriks yang memiliki invers yang sama dengan transposenya 
+* matriks diagonal: matriks yang nilainya hanya terdapat pada diagonalnya, sementara elemen lainnya bernilai nol.
+
+Anda dapat melakukan SVD menggunakan fungsi `svd()`.
+
+```{r}
+# Perform Singular Value Decomposition (SVD)
+residuals <- chi_sq/sqrt(n)
+
+# Number of dimensions (rule of SVD)
+nb.axes <- min(nrow(residuals)-1, ncol(residuals)-1)
+
+# Singular value decomposition
+SVD <- svd(residuals, nu = nb.axes, nv = nb.axes)
+rownames(SVD$u) = rownames(housetasks)
+rownames(SVD$v) = colnames(housetasks)
+SVD
+```
+
+Menyimpan komponen-komponen yang dihasilkan dari SVD
+```{r}
+sv <- SVD$d[1:nb.axes] # singular value
+u <- SVD$u #vector eigen baris
+v <- SVD$v #vector eigen kolom
+```
+
+
+Eigenvalues dan eigenvectors dapat dihitung dari SVD. *Eigenvalues* mewakili variansi yang dijelaskan oleh setiap dimensi, sedangkan eigenvectors mewakili loadings variabel.
+
+```{r}
+# Eigenvalues
+eig <- sv^2
+eig
+```
+
+**Step 6: Visualize the results**
+
+Akhirnya, Anda dapat memvisualisasikan hasil CA dengan memplotting koordinat dari variabel pada dua dimensi pertama.
+
+Row Coordinat:
+$$row.coord = \frac{U * \delta}{\sqrt{row.marginals/grand.total}}$$
+Kita dapat menggunakan fungsi `apply()` untuk melakukan operasi sewenang-wenang pada baris dan kolom matriks.
+
+`apply(X, MARGIN, FUN, ...)`
+
+Keterangan:
+
+* `X`: suatu matriks
+* `MARGIN`: nilai yang diperbolehkan bisa 1 atau 2. 1 menentukan bahwa kita ingin beroperasi pada baris matriks. 2 menentukan bahwa kami ingin beroperasi pada kolom.
+* `FUN`: operasi matematika yang diinginkan
+* `...`: argumen opsional terkait FUN
+
+```{r}
+# row coord = u * sv /sqrt(row_marginals/n)
+cc <- apply(u, 1, '*', sv) # each row X sv
+row.coord <- apply(cc, 1, '/', sqrt(row_marginals/n))
+rownames(row.coord) <- rownames(housetasks)
+colnames(row.coord) <- paste0("Dim.", 1:nb.axes)
+round(row.coord,3)
+```
+
+Column Coordinat:
+$$col.coord = \frac{V * \delta}{\sqrt{col.marginals/grand.total}}$$
+
+```{r}
+# coordinates sv * v /sqrt(col_marginals/n)
+cc <- apply(v, 1, '*', sv)
+col.coord <- apply(cc, 1, '/', sqrt(col_marginals/n))
+rownames(col.coord) <- colnames(housetasks)
+colnames(col.coord) <- paste0("Dim", 1:nb.axes)
+head(col.coord)
+```
+
+
+Untuk membuat biploy CA, Anda dapat membuat scatter plot menggunakan fungsi `plot()` dan memberi label pada titik menggunakan fungsi `text()`.
+
+```{r}
+#limit axis x dan y
+xlim <- range(c(row.coord[,1], col.coord[,1]))*1.1
+ylim <- range(c(row.coord[,2], col.coord[,2]))*1.1
+
+# Plot of rows
+plot(row.coord, pch=19, col = "blue", xlim = xlim, ylim = ylim)
+text(row.coord, labels = rownames(row.coord), pos = 3, col ="blue")
+
+# plot of columns
+points(col.coord, pch=17, col = "red")
+text(col.coord, labels = rownames(col.coord), pos = 3, col ="red")
+abline(v=0, h=0, lty = 2)
+```
+
+
+
